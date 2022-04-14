@@ -136,7 +136,7 @@ void spi_delay() {
   //delay(1);
 }
 
-void spi_write_register(uint8_t reg, uint8_t* val, uint8_t num_bytes){
+void spi_write_register(uint8_t reg, uint8_t num_bytes, uint8_t* val){
   // Select chip
   if (num_bytes == 4) {
     //Serial.print((uint8_t) val[0], HEX);
@@ -206,10 +206,14 @@ uint8_t nrf24_get_CONFIG() {
  */
 void nrf24_spi_write_test() {
     Serial.println("---- nRF24 SPI registers write test. ----");
+    
     uint8_t write_bytes[5] = {0x10,0x10,0x10,0x10,0x10};  // 定义一个静态发送地址
+    uint8_t original_bytes[5] = {0};
     uint8_t read_bytes[5] = {0};
-    spi_write_register(W_REGISTER_MASK + TX_ADDR, write_bytes, 5);     // 写入发送地址
+    spi_read_register(R_REGISTER_MASK + TX_ADDR, 5, original_bytes);  // 为了应答接收设备，接收通道0地址和发送地址相同
+    spi_write_register(W_REGISTER_MASK + TX_ADDR, 5, write_bytes);     // 写入发送地址
     spi_read_register(R_REGISTER_MASK + TX_ADDR, 5, read_bytes);  // 为了应答接收设备，接收通道0地址和发送地址相同
+    spi_write_register(W_REGISTER_MASK + TX_ADDR, 5, original_bytes);     // 写入发送地址
     
     if (read_bytes[0] == write_bytes[0]
       && read_bytes[1] == write_bytes[1]
@@ -224,9 +228,12 @@ void nrf24_spi_write_test() {
 
     
     uint8_t write_byte = 0x01;
+    uint8_t original_byte = 0x00;
     uint8_t read_byte = 0x00;
-    spi_write_register(W_REGISTER_MASK + EN_AA, write_byte, 1);      
+    spi_read_register(R_REGISTER_MASK + EN_AA, 1, &original_byte);
+    spi_write_register(W_REGISTER_MASK + EN_AA, 1, write_byte);      
     spi_read_register(R_REGISTER_MASK + EN_AA, 1, &read_byte);
+    spi_write_register(W_REGISTER_MASK + EN_AA, 1, original_byte);      
 
     if (read_byte == write_byte) {
       Serial.println("SPI write single byte test passed.");
@@ -274,14 +281,14 @@ bool nrf24_tx_self_test() {
   // [Current State: Power-on reset 100 ms] 
   SPI_CE_0();
   // [Current State: (RF transmission is) Power Down (But SPI is alive.)]
-  spi_write_register(W_REGISTER_MASK + EN_AA, 0x00, 1);        // disable auto acknowledgement  
-  spi_write_register(W_REGISTER_MASK + EN_RXADDR, 0x00, 1);    // disable RX data pipes
-  spi_write_register(W_REGISTER_MASK + SETUP_RETR, 0x00, 1);   // disable automatic re-transmit, ARC = 0000
-  spi_write_register(W_REGISTER_MASK + CONFIG, 0x0E, 1);       // PWR_UP = 1 PRIMRX=0 (TX mode)
+  spi_write_register(W_REGISTER_MASK + EN_AA, 1, 0x00);        // disable auto acknowledgement  
+  spi_write_register(W_REGISTER_MASK + EN_RXADDR, 1, 0x00);    // disable RX data pipes
+  spi_write_register(W_REGISTER_MASK + SETUP_RETR, 1, 0x00);   // disable automatic re-transmit, ARC = 0000
+  spi_write_register(W_REGISTER_MASK + CONFIG, 1, 0x0E);       // PWR_UP = 1 PRIMRX=0 (TX mode)
 
   // PWR_UP=1 -> [Current State: Standby-I]
   uint8_t test_payload[4] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, now TX FIFO not empty 
-  spi_write_register(W_TX_PAYLOAD, test_payload, 4);
+  spi_write_register(W_TX_PAYLOAD, 4, test_payload);
   SPI_CE_1(); // Chip Enable. Fire the packet out on the antenna!
   
   // TX FIFO not empty / CE = 1 -> [Current State: TX MODE]
@@ -302,9 +309,9 @@ bool nrf24_tx_self_test() {
   SPI_CE_0();
   // CE=0 -> Return to [State: Standby-I]. 
   uint8_t val = 0x08;
-  spi_write_register(W_REGISTER_MASK + CONFIG, &val, 1);
+  spi_write_register(W_REGISTER_MASK + CONFIG, 1, &val);
   val = 0x0e;
-  spi_write_register(W_REGISTER_MASK + STATUS, &val, 1);
+  spi_write_register(W_REGISTER_MASK + STATUS, 1, &val);
   // PWR_UP=0 -> Return to Power-Down Mode.
 }
 
@@ -313,7 +320,7 @@ bool nrf24_tx_self_test() {
 void nrf24_keep_sending() {
 
   uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, TX FIFO not empty 
-  spi_write_register(W_TX_PAYLOAD, (uint8_t*) payload, 4);
+  spi_write_register(W_TX_PAYLOAD, 4, (uint8_t*) payload);
   SPI_CE_1(); // fire out the transmit packet
   delay(1);
   // TX Setting
@@ -326,7 +333,7 @@ void nrf24_keep_sending() {
     // Serial.println("nrf24 send failure.");
   }
   // write 1 to clear TX_DS
-  spi_write_register(W_REGISTER_MASK + STATUS, 0x20, 1); 
+  spi_write_register(W_REGISTER_MASK + STATUS, 1, 0x20); 
   SPI_CE_0(); // stop transmission. return to Standby-I state.
   // Return to [State: Standby-I]
 }
@@ -343,41 +350,41 @@ void RF_SEND() {
     SPI_CE_0();
 
     unsigned char TX_ADDRESS[5] = {0x10,0x10,0x10,0x10,0x10};  // 定义一个静态发送地址
-    spi_write_register(W_REGISTER_MASK + TX_ADDR, TX_ADDRESS, 5);     // 写入发送地址
-    spi_write_register(W_REGISTER_MASK + RX_ADDR_P0, TX_ADDRESS, 5);  // 为了应答接收设备，接收通道0地址和发送地址相同
+    spi_write_register(W_REGISTER_MASK + TX_ADDR, 5, TX_ADDRESS);     // 写入发送地址
+    spi_write_register(W_REGISTER_MASK + RX_ADDR_P0, 5, TX_ADDRESS);  // 为了应答接收设备，接收通道0地址和发送地址相同
     
 
     uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, TX FIFO not empty 
 
-    spi_write_register(W_TX_PAYLOAD, payload, 4);                  // 写数据包到TX FIFO
+    spi_write_register(W_TX_PAYLOAD, 4, payload);                  // 写数据包到TX FIFO
     
     val = 0x00;
-    spi_write_register(W_REGISTER_MASK + EN_AA, &val, 1);       // 使能接收通道0自动应答
+    spi_write_register(W_REGISTER_MASK + EN_AA, 1, &val);       // 使能接收通道0自动应答
     spi_read_register(R_REGISTER_MASK + EN_AA, 1, &check);
     if (check != val) { Serial.print("We have problem with EN_AA. "); Serial.print("shoud be: "); Serial.print(val,HEX); Serial.print(" but it is: ");Serial.println(check, HEX); }
 
     val = 0x00;
-    spi_write_register(W_REGISTER_MASK + EN_RXADDR, &val, 1);   // 使能接收通道0
+    spi_write_register(W_REGISTER_MASK + EN_RXADDR, 1, &val);   // 使能接收通道0
     spi_read_register(R_REGISTER_MASK + EN_RXADDR, 1, &check);
     if (check != val) Serial.println("We have problem with EN_RXADDR");
 
     val = 0x00;
-    spi_write_register(W_REGISTER_MASK + SETUP_RETR, &val, 1);  // 自动重发延时等待250us+86us，自动重发10次
+    spi_write_register(W_REGISTER_MASK + SETUP_RETR, 1, &val);  // 自动重发延时等待250us+86us，自动重发10次
     spi_read_register(R_REGISTER_MASK + SETUP_RETR, 1, &check);
     if (check != val) Serial.println("We have problem with SETUP_RETR");
 
     val = 40;
-    spi_write_register(W_REGISTER_MASK + RF_CH, &val, 1);         // 选择射频通道0x40
+    spi_write_register(W_REGISTER_MASK + RF_CH, 1, &val);         // 选择射频通道0x40
     spi_read_register(R_REGISTER_MASK + RF_CH, 1, &check);
     if (check != val) { Serial.println("We have problem with RF_CH"); Serial.print("shoud be: "); Serial.print(val,HEX); Serial.print(" but it is: ");Serial.println(check, HEX); }
 
     val = 0x07;
-    spi_write_register(W_REGISTER_MASK + RF_SETUP, &val, 1);    // 数据传输率1Mbps，发射功率0dBm，低噪声放大器增益
+    spi_write_register(W_REGISTER_MASK + RF_SETUP, 1, &val);    // 数据传输率1Mbps，发射功率0dBm，低噪声放大器增益
     spi_read_register(R_REGISTER_MASK + RF_SETUP, 1, &check);
     if (check != val) { Serial.println("We have problem with RF_SETUP"); Serial.print("shoud be: "); Serial.print(val,HEX); Serial.print(" but it is: ");Serial.println(check, HEX); }
     
     val = 0x0e;
-    spi_write_register(W_REGISTER_MASK + CONFIG, &val, 1);      // CRC使能，16位CRC校验，上电
+    spi_write_register(W_REGISTER_MASK + CONFIG, 1, &val);      // CRC使能，16位CRC校验，上电
     spi_read_register(R_REGISTER_MASK + CONFIG, 1, &check);
     if (check != val) Serial.println("We have problem with CONFIG");
     delay(150);
@@ -400,7 +407,7 @@ void setup() {
   Serial.begin(9600); 
   gpio_init();
 
-  // nrf24_spi_write_test();
+  nrf24_spi_write_test();
   // nrf24_tx_self_test();
   
 

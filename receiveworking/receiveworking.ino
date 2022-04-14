@@ -141,7 +141,7 @@ void spi_delay() {
   delay(1);
 }
 
-void spi_write_register(uint8_t reg, uint8_t* val, uint8_t num_bytes){
+void spi_write_register(uint8_t reg, uint8_t num_bytes, uint8_t* val){
   // Select chip
   SPI_CS_1();
 
@@ -214,12 +214,12 @@ void nrf24_receive_init() {
   // [Current State: Power-on reset 100 ms] 
   SPI_CE_1();
   // [Current State: Power Down]
-  spi_write_register(W_REGISTER_MASK + EN_AA, 0x00, 1);        // disable auto acknowledgement  
-  spi_write_register(W_REGISTER_MASK + EN_RXADDR, 0x00, 1);    // disable RX datapipes
-  //spi_write_register(W_REGISTER_MASK + SETUP_RETR, 0x00, 1);   // disable automatic retransmission, ARC = 0000
+  spi_write_register(W_REGISTER_MASK + EN_AA, 1, 0x00);        // disable auto acknowledgement  
+  spi_write_register(W_REGISTER_MASK + EN_RXADDR, 1, 0x00);    // disable RX datapipes
+  //spi_write_register(W_REGISTER_MASK + SETUP_RETR, 1, 0x00);   // disable automatic retransmission, ARC = 0000
   // [Current State: Standby-I]
   
-  spi_write_register(W_REGISTER_MASK + CONFIG, 0x0F, 1);       // PWR_UP = 1 PRIMRX=0 (TX mode)
+  spi_write_register(W_REGISTER_MASK + CONFIG, 1, 0x0F);       // PWR_UP = 1 PRIMRX=0 (TX mode)
   uint8_t configg = nrf24_get_CONFIG();
   // Serial.println(configg,HEX);
   stat = nrf24_get_STATUS();
@@ -250,25 +250,25 @@ void RF_RX() {
     
     SPI_CE_0();
     unsigned char TX_ADDRESS[5] = {0x10,0x10,0x10,0x10,0x10};  // 定义一个静态发送地址
-    spi_write_register(W_REGISTER_MASK + RX_ADDR_P0, TX_ADDRESS, 5);  // 接收设备接收通道0使用和发送设备相同的发送地址
+    spi_write_register(W_REGISTER_MASK + RX_ADDR_P0, 5, TX_ADDRESS);  // 接收设备接收通道0使用和发送设备相同的发送地址
     
     val = 0x00;
-    spi_write_register(W_REGISTER_MASK + EN_AA, &val, 1);               // 使能接收通道0自动应答
+    spi_write_register(W_REGISTER_MASK + EN_AA, 1, &val);               // 使能接收通道0自动应答
     
     val = 0x01;
-    spi_write_register(W_REGISTER_MASK + EN_RXADDR, &val, 1);           // 使能接收通道0
+    spi_write_register(W_REGISTER_MASK + EN_RXADDR, 1, &val);           // 使能接收通道0
     
     val = 40;
-    spi_write_register(W_REGISTER_MASK + RF_CH, &val, 1);                 // 选择射频通道0x40
+    spi_write_register(W_REGISTER_MASK + RF_CH, 1, &val);                 // 选择射频通道0x40
 
     val = 0x07;
-    spi_write_register(W_REGISTER_MASK + RF_SETUP, &val, 1);            // 数据传输率1Mbps，发射功率0dBm，低噪声放大器增益
+    spi_write_register(W_REGISTER_MASK + RF_SETUP, 1, &val);            // 数据传输率1Mbps，发射功率0dBm，低噪声放大器增益
     
     val = 4;
-    spi_write_register(W_REGISTER_MASK + RX_PW_P0, &val, 1);  // 接收通道0选择和发送通道相同有效数据宽度
+    spi_write_register(W_REGISTER_MASK + RX_PW_P0, 1, &val);  // 接收通道0选择和发送通道相同有效数据宽度
     
     val = 0x0f;
-    spi_write_register(W_REGISTER_MASK + CONFIG, &val, 1);              // CRC使能，16位CRC校验，上电，接收模式
+    spi_write_register(W_REGISTER_MASK + CONFIG, 1, &val);              // CRC使能，16位CRC校验，上电，接收模式
     delay(150);
     SPI_CE_1();                                            // 拉高CE启动接收设备
     spi_read_register(R_REGISTER_MASK + CONFIG, 1, &cfg);
@@ -289,7 +289,7 @@ void nrf24_keep_receiving() {
     uint8_t payload[4]; 
     spi_read_register(R_RX_PAYLOAD, 4, payload);
     Serial.print("payload: "); for (int i = 0; i < 4; ++i) Serial.print( (uint8_t)payload[i], HEX); Serial.println("");
-    spi_write_register(W_REGISTER_MASK + STATUS, &stat, 1);
+    spi_write_register(W_REGISTER_MASK + STATUS, 1, &stat);
     SPI_CE_1();
   }else {
     Serial.println("no : (");

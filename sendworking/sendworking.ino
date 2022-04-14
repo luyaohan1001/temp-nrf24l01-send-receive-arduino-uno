@@ -139,10 +139,10 @@ void spi_delay() {
 void spi_write_register(uint8_t reg, uint8_t* val, uint8_t num_bytes){
   // Select chip
   if (num_bytes == 4) {
-    Serial.print((char) val[0], HEX);
-    Serial.print((char)val[1], HEX);
-    Serial.print((char)val[2], HEX);
-    Serial.print((char)val[3], HEX);
+    Serial.print((uint8_t) val[0], HEX);
+    Serial.print((uint8_t)val[1], HEX);
+    Serial.print((uint8_t)val[2], HEX);
+    Serial.print((uint8_t)val[3], HEX);
   }
   SPI_CS_1();
 
@@ -237,7 +237,7 @@ bool nrf24_tx_self_test() {
   spi_write_register(W_REGISTER_MASK + CONFIG, 0x0E, 1);       // PWR_UP = 1 PRIMRX=0 (TX mode)
   stat = nrf24_get_STATUS();
   // [Current State: TX MODE]
-  uint8_t payload[] = {0x11, 0x11, 0x22, 0x33}; // clock in a payload, TX FIFO not empty 
+  uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, TX FIFO not empty 
   spi_write_register(W_TX_PAYLOAD, payload, 4);
   stat = nrf24_get_STATUS();
   SPI_CE_1(); // fire out the transmit packet
@@ -257,7 +257,7 @@ bool nrf24_tx_self_test() {
 
 void nrf24_keep_sending() {
 
-  uint8_t payload[] = {0x11, 0x11, 0x22, 0x33}; // clock in a payload, TX FIFO not empty 
+  uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, TX FIFO not empty 
   spi_write_register(W_TX_PAYLOAD, (uint8_t*) payload, 4);
   SPI_CE_1(); // fire out the transmit packet
   delay(1);
@@ -291,8 +291,10 @@ void RF_SEND() {
     spi_write_register(W_REGISTER_MASK + TX_ADDR, TX_ADDRESS, 5);     // 写入发送地址
     spi_write_register(W_REGISTER_MASK + RX_ADDR_P0, TX_ADDRESS, 5);  // 为了应答接收设备，接收通道0地址和发送地址相同
     
-    uint8_t buf[] = {0x22,0x21,0x12,0x33};
-    spi_write_register(W_TX_PAYLOAD, buf, 4);                  // 写数据包到TX FIFO
+
+    uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, TX FIFO not empty 
+
+    spi_write_register(W_TX_PAYLOAD, payload, 4);                  // 写数据包到TX FIFO
     
     val = 0x00;
     spi_write_register(W_REGISTER_MASK + EN_AA, &val, 1);       // 使能接收通道0自动应答

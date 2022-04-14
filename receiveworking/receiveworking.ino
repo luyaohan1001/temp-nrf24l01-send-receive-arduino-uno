@@ -288,9 +288,9 @@ void nrf24_keep_receiving() {
     Serial.println("yes : )");
     uint8_t payload[4]; 
     spi_read_register(R_RX_PAYLOAD, 4, payload);
-    Serial.print("payload: "); for (int i = 0; i < 4; ++i) Serial.print( (char)payload[i], HEX); Serial.println("");
+    Serial.print("payload: "); for (int i = 0; i < 4; ++i) Serial.print( (uint8_t)payload[i], HEX); Serial.println("");
     spi_write_register(W_REGISTER_MASK + STATUS, &stat, 1);
-    // SPI_CE_1();
+    SPI_CE_1();
   }else {
     Serial.println("no : (");
   }

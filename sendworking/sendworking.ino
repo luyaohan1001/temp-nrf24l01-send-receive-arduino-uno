@@ -139,10 +139,10 @@ void spi_delay() {
 void spi_write_register(uint8_t reg, uint8_t* val, uint8_t num_bytes){
   // Select chip
   if (num_bytes == 4) {
-    Serial.print((uint8_t) val[0], HEX);
-    Serial.print((uint8_t)val[1], HEX);
-    Serial.print((uint8_t)val[2], HEX);
-    Serial.print((uint8_t)val[3], HEX);
+    //Serial.print((uint8_t) val[0], HEX);
+    //Serial.print((uint8_t)val[1], HEX);
+    //Serial.print((uint8_t)val[2], HEX);
+    //Serial.print((uint8_t)val[3], HEX);
   }
   SPI_CS_1();
 
@@ -163,13 +163,14 @@ void spi_write_register(uint8_t reg, uint8_t* val, uint8_t num_bytes){
 void spi_read_register(uint8_t reg, uint8_t num_bytes, uint8_t* pbuf){
   // Select chip
   SPI_CS_1();
-
+  
   // Write register address to read.
   gpio_clockout_8_bits(reg);
   // Read value
   for (int i = 0; i < num_bytes; ++i) {
     pbuf[i] = gpio_clockin_8_bits();
   }
+  
   // Deselect chip
   SPI_CS_0();
 }
@@ -188,29 +189,62 @@ uint8_t nrf24_get_STATUS() {
 uint8_t nrf24_get_FIFO_STATUS() {
   uint8_t fifo_status;
   spi_read_register(R_REGISTER_MASK + FIFO_STATUS, 1, &fifo_status);
-  Serial.print("fifo status: "); Serial.println(fifo_status,HEX);
+  // Serial.print("- FIFO STATUS: "); Serial.println(fifo_status,HEX);
 }
 
 
 uint8_t nrf24_get_CONFIG() {
   uint8_t config_reg;
   spi_read_register(R_REGISTER_MASK + CONFIG, 1, &config_reg);
-  Serial.print("CONFIG: "); Serial.println(config_reg,HEX);
+  // Serial.print("- CONFIG: "); Serial.println(config_reg,HEX);
 }
 
 
-void nrf24_poweron_self_test() {
-  uint8_t config_reg;
-  spi_read_register(R_REGISTER_MASK + CONFIG, 1, &config_reg);
-  if (config_reg != 0x08) { // the register reset value is expect 0x08
-    Serial.println("(!) Critical Error: NRF24 CONFIG register should have reset value of 0x08. Re-plug in nrf24 on the 3.3V power wire.");
-  }
+/**
+ * Brief: Before we start debugging whether Transmitter can send or Receiver can receive. We need to make sure that SPI can write to nRF24 registers successfully.
+ * Test: Write to a bunch of registers and read. Compare if read value is same as write value.
+ */
+void nrf24_spi_write_test() {
+    Serial.println("---- nRF24 SPI registers write test. ----");
+    uint8_t write_bytes[5] = {0x10,0x10,0x10,0x10,0x10};  // 定义一个静态发送地址
+    uint8_t read_bytes[5] = {0};
+    spi_write_register(W_REGISTER_MASK + TX_ADDR, write_bytes, 5);     // 写入发送地址
+    spi_read_register(R_REGISTER_MASK + TX_ADDR, 5, read_bytes);  // 为了应答接收设备，接收通道0地址和发送地址相同
+    
+    if (read_bytes[0] == write_bytes[0]
+      && read_bytes[1] == write_bytes[1]
+      && read_bytes[2] == write_bytes[2]
+      && read_bytes[3] == write_bytes[3]
+      && read_bytes[4] == write_bytes[4]
+    ) {
+      Serial.println("SPI write continuous bytes test passed.");
+    } else {
+      Serial.println("Problem writing continuous bytes through SPI. ");
+    }
+
+    
+    uint8_t write_byte = 0x01;
+    uint8_t read_byte = 0x00;
+    spi_write_register(W_REGISTER_MASK + EN_AA, write_byte, 1);      
+    spi_read_register(R_REGISTER_MASK + EN_AA, 1, &read_byte);
+
+    if (read_byte == write_byte) {
+      Serial.println("SPI write single byte test passed.");
+    } else {
+      Serial.println("Problem writing single bytes through SPI. ");
+    }
+    
 }
 
-/*  Brief: 1. Disable Auto Acknowledgement, Auto Retransmit. TX_DS will be be set if these two are not turn-off.
+/**  
+ *  Brief: We need to make sure the Transmitter work before we have a Receiver working.
+ *  
+ *  How to know TX payload is loaded?
+ *  
+ *  Steps: 1. Disable Auto Acknowledgement, Auto Retransmit. TX_DS will be be set if these two are not turn-off.
  *         2. TX_DS (in STATUS register) is expected to be set when data in TX FIFO is set.
- *  Others: 
- *        How to know TX payload is loaded?
+ *         STATUS = 0x2E after firing means we have a working TX module.
+ *        
  *        After writing to W_TX_PAYLOAD, TX_EMPTY (in FIFO_STATUS register) becomes 0.
  *        
  *        What happens if sending is not successful?
@@ -219,41 +253,62 @@ void nrf24_poweron_self_test() {
  *        TX_DS (in STATUS register) remains 0.  
  *  States: 
  *        The states can be referred in 6.1.1 State diagram.
+ *  
+ *  STATUS register
+ *            7             6           5         4         3:1         0
+ *        <reserved>      RX_DR       TX_DS     MAX_RT     RX_P_NO     TX_FULL
+ *        -----------------------------------------------------------------------
+ *         Always 0       Receive     Transfer  Maximum    000-101 :    1: 
+ *                        Data        Data      TX         Data Pipe #  TX_FULL
+ *                        Ready       Sent      Transmits  110 :
+ *                                                         Not Used.
+ *                                                         111:
+ *                                                         RX FIFO Empty.
  */
 bool nrf24_tx_self_test() {
-  uint8_t stat;
+  Serial.println("---- nRF24 TX self test. ----");
+  Serial.println("---- A test to verify SPI register settings. Send without a receiver. ----");
+  uint8_t nrf24_status = 0x00;
+
+  // Note that if we reset the Arduino without re-poweron the chip, initial value of registers such as STATUS or CONFIG may be different from one listed in datasheet.
   // [Current State: Power-on reset 100 ms] 
   SPI_CE_0();
-  // [Current State: Power Down]
+  // [Current State: (RF transmission is) Power Down (But SPI is alive.)]
   spi_write_register(W_REGISTER_MASK + EN_AA, 0x00, 1);        // disable auto acknowledgement  
-  spi_write_register(W_REGISTER_MASK + EN_RXADDR, 0x00, 1);    // disable RX datapipes
-  spi_write_register(W_REGISTER_MASK + SETUP_RETR, 0x00, 1);   // disable automatic retransmission, ARC = 0000
-  //////// DISPOSABLE
-  spi_write_register(W_REGISTER_MASK + RF_CH, 40, 1);   // disable automatic retransmission, ARC = 0000
-  spi_write_register(W_REGISTER_MASK + RF_SETUP, 0b00001110, 1);
-  spi_write_register(W_REGISTER_MASK + RX_PW_P0, 4, 1);
-  ////////DISPOSABLE
-  // [Current State: Standby-I]
+  spi_write_register(W_REGISTER_MASK + EN_RXADDR, 0x00, 1);    // disable RX data pipes
+  spi_write_register(W_REGISTER_MASK + SETUP_RETR, 0x00, 1);   // disable automatic re-transmit, ARC = 0000
   spi_write_register(W_REGISTER_MASK + CONFIG, 0x0E, 1);       // PWR_UP = 1 PRIMRX=0 (TX mode)
-  stat = nrf24_get_STATUS();
-  // [Current State: TX MODE]
-  uint8_t payload[] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, TX FIFO not empty 
-  spi_write_register(W_TX_PAYLOAD, payload, 4);
-  stat = nrf24_get_STATUS();
-  SPI_CE_1(); // fire out the transmit packet
-  delay(10);
-  // TX Setting
-  stat = nrf24_get_STATUS();
-  if (stat & 0x20) { // TX_DS bit is set.
-    Serial.print("nrf24 transmission self test has passed.");
+
+  // PWR_UP=1 -> [Current State: Standby-I]
+  uint8_t test_payload[4] = {0xDE, 0xAD, 0xBE, 0xEF}; // clock in a payload, now TX FIFO not empty 
+  spi_write_register(W_TX_PAYLOAD, test_payload, 4);
+  SPI_CE_1(); // Chip Enable. Fire the packet out on the antenna!
+  
+  // TX FIFO not empty / CE = 1 -> [Current State: TX MODE]
+  nrf24_status = nrf24_get_STATUS();
+  delay(1);
+
+  // Now check if TX self-test pass.
+  nrf24_status = nrf24_get_STATUS();  
+  if (nrf24_status & 0x2E) { // TX_DS bit is set.
+    Serial.println("");
+    Serial.println(" > nrf24 transmission self test has passed. STATUS has value of 0x2E, TX_DS (transfer data sent) was set, RX_P_NO = 111, means RX FIFO Empty.");
     return true;
   } else {
-    Serial.print("nrf24 transmission self test has failed.");
+    Serial.println("");
+    Serial.print("nrf24 transmission self test has failed. STATUS is expected 0x2E. The actual value is: "); Serial.println(nrf24_status);
     return false;
   }
-  SPI_CE_0(); // stop transmission. return to Standby-I state.
-  // Return to [State: Standby-I]
+  SPI_CE_0();
+  // CE=0 -> Return to [State: Standby-I]. 
+  uint8_t val = 0x08;
+  spi_write_register(W_REGISTER_MASK + CONFIG, &val, 1);
+  val = 0x0e;
+  spi_write_register(W_REGISTER_MASK + STATUS, &val, 1);
+  // PWR_UP=0 -> Return to Power-Down Mode.
 }
+
+
 
 void nrf24_keep_sending() {
 
@@ -331,7 +386,7 @@ void RF_SEND() {
     Serial.print(stat, HEX);
     // if (stat & 0x20) { // TX_DS bit is set.
     if (stat == 0x2e) { // TX_DS bit is set.
-      // Serial.println("nrf24 send successful.");
+      Serial.println("nrf24 send successful.");
     } else {
       // Serial.println("nrf24 send failure.");
     }
@@ -345,9 +400,10 @@ void setup() {
   Serial.begin(9600); 
   gpio_init();
 
-  nrf24_poweron_self_test();
-  
+  // nrf24_spi_write_test();
   // nrf24_tx_self_test();
+  
+
 
   
 }
